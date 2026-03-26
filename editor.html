@@ -28,11 +28,6 @@
       font-size: 16px;
       cursor: pointer;
     }
-    footer {
-      margin-top: 30px;
-      font-size: 0.9em;
-      color: #555;
-    }
   </style>
 </head>
 <body>
@@ -53,27 +48,20 @@ let pyodide;
 async function loadPyodideAndPackages() {
   pyodide = await loadPyodide();
   console.log("Pyodide loaded!");
-}
-loadPyodideAndPackages();
 
-// JS function for incremental output
-window.update_output = (text) => {
-  const output = document.getElementById("output");
-  output.textContent = text;
-  output.scrollTop = output.scrollHeight; // auto-scroll
-};
-
-async function runCode() {
-  const code = document.getElementById("code").value;
-  const output = document.getElementById("output");
-  output.textContent = ""; // Clear previous output
-
-  try {
-    // Setup Python to stream stdout
-    pyodide.runPython(`
+  // Setup output streaming and restricted imports
+  pyodide.runPython(`
 import sys
+import builtins
 import js
 
+# Allowed standard library modules
+ALLOWED_MODULES = {
+    "asyncio", "math", "time", "sys", "random",
+    "itertools", "functools", "collections", "re"
+}
+
+# Stream stdout to JS
 class Stream:
     def __init__(self):
         self.content = ""
@@ -85,14 +73,32 @@ class Stream:
 
 sys.stdout = Stream()
 sys.stderr = Stream()
+
+# Block imports not in whitelist
+_real_import = builtins.__import__
+def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name not in ALLOWED_MODULES:
+        raise ImportError(f"Import of '{name}' is blocked")
+    return _real_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = restricted_import
 `);
+}
 
-    // input() support via prompt()
-    pyodide.globals.set("input", (msg) => prompt(msg || ""));
+// JS function to update output live
+window.update_output = (text) => {
+  const output = document.getElementById("output");
+  output.textContent = text;
+  output.scrollTop = output.scrollHeight;
+};
 
-    // Run Python code
+async function runCode() {
+  const code = document.getElementById("code").value;
+  const output = document.getElementById("output");
+  output.textContent = ""; // clear previous output
+
+  try {
     await pyodide.runPythonAsync(code);
-
   } catch (err) {
     output.textContent += "\n" + err;
   }
