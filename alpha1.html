@@ -31,7 +31,7 @@ async function loadPyodideAndPackages() {
   pyodide = await loadPyodide();
   console.log("Pyodide loaded!");
 
-  // Setup stdout streaming and restricted imports
+  // Setup stdout streaming, restricted imports, and input()
   await pyodide.runPythonAsync(`
 import sys
 import builtins
@@ -66,6 +66,11 @@ def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
     return _real_import(name, globals, locals, fromlist, level)
 
 builtins.__import__ = restricted_import
+
+# input() via browser prompt
+def browser_input(prompt_text=""):
+    return js.prompt(prompt_text)
+__builtins__.input = browser_input
 `);
 
   // Enable Run button
@@ -101,37 +106,39 @@ async function runCode() {
 }
 
 loadPyodideAndPackages();
-  const codeArea = document.getElementById("code");
+
+// ------------------------
+// Auto-indent + Tab handling
+// ------------------------
+const codeArea = document.getElementById("code");
 
 codeArea.addEventListener("keydown", function(e) {
   const start = this.selectionStart;
   const end = this.selectionEnd;
   const value = this.value;
 
-  // Handle Tab key
+  // Tab inserts tab character
   if (e.key === "Tab") {
     e.preventDefault();
     this.value = value.substring(0, start) + "\t" + value.substring(end);
     this.selectionStart = this.selectionEnd = start + 1;
   }
 
-  // Handle Enter key for auto-indent
+  // Enter auto-indent
   if (e.key === "Enter") {
     e.preventDefault();
 
-    // Find current line start
     const lineStart = value.lastIndexOf("\n", start - 1) + 1;
     const currentLine = value.substring(lineStart, start);
 
-    // Leading whitespace of current line
+    // Copy existing indentation
     let indent = currentLine.match(/^\s*/)[0];
 
-    // Add extra indent if last non-space character is ':'
+    // Extra indent if line ends with ':'
     if (currentLine.trimEnd().endsWith(":")) {
-      indent += "\t";  // or use spaces: indent += "    ";
+      indent += "\t"; // or spaces: indent += "    ";
     }
 
-    // Insert newline + computed indent
     this.value = value.substring(0, start) + "\n" + indent + value.substring(end);
     this.selectionStart = this.selectionEnd = start + 1 + indent.length;
   }
