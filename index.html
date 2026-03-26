@@ -33,12 +33,15 @@ async function runCode() {
   let output = document.getElementById("output");
 
   try {
-    // Redirect Python stdout to JS
+    // Redirect stdout
     pyodide.runPython(`
-    import sys
-    from io import StringIO
-    sys.stdout = StringIO()
-    `);
+import sys
+from io import StringIO
+sys.stdout = StringIO()
+`);
+
+    // Make input() work using browser prompt
+    pyodide.globals.set("input", (msg) => prompt(msg));
 
     await pyodide.runPythonAsync(code);
 
