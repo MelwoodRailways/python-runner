@@ -7,48 +7,27 @@
   <style>
     body { font-family: monospace; margin: 20px; }
     #code { width: 100%; font-family: monospace; font-size: 14px; }
-    #output { width: 100%; height: 300px; background: black; color: lightgreen; padding: 10px; overflow-y: auto; white-space: pre-wrap; }
+    #output { width: 100%; min-height: 200px; background: black; color: lightgreen; padding: 10px; white-space: pre-wrap; }
+    .inline-input { color: black; }
   </style>
 </head>
 <body>
 
 <h2>Python Editor</h2>
-
-<textarea id="code" rows="20" cols="70">
+<textarea id="code" rows="15" cols="70">
 print("Hello world!")
 x = input("Enter a number: ")
 print("You typed:", x)
 </textarea>
 <br><br>
-
 <button onclick="runCode()">Run</button>
 
 <h3>Output:</h3>
-<pre id="output"></pre>
+<div id="output"></div>
 
 <script>
 let pyodide;
 let inputResolve;
-
-// Helper to write to the output box
-function writeOutput(text) {
-  const output = document.getElementById("output");
-  output.textContent += text;
-  output.scrollTop = output.scrollHeight; // auto scroll
-}
-
-// Handle Enter key for inline input
-document.getElementById("output").addEventListener("keydown", function(e) {
-  if (e.key === "Enter" && inputResolve) {
-    const output = document.getElementById("output");
-    const lines = output.textContent.split("\n");
-    const lastLine = lines[lines.length - 1];
-    inputResolve(lastLine.replace(/^[^:]*:\s*/, "")); // remove prompt text
-    inputResolve = null;
-    writeOutput("\n");
-    e.preventDefault();
-  }
-});
 
 // Load Pyodide
 async function loadPyodideAndPackages() {
@@ -56,26 +35,49 @@ async function loadPyodideAndPackages() {
 }
 loadPyodideAndPackages();
 
-// Run code function
+// Helper to write text to output
+function writeOutput(text) {
+  const output = document.getElementById("output");
+  output.innerHTML += text;
+  output.scrollTop = output.scrollHeight;
+}
+
+// Show inline input
+function createInput(promptText) {
+  const output = document.getElementById("output");
+  writeOutput(promptText);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-input";
+  output.appendChild(input);
+  input.focus();
+
+  return new Promise(resolve => {
+    input.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        const value = input.value;
+        output.removeChild(input);
+        writeOutput(value + "\n");
+        resolve(value);
+      }
+    });
+  });
+}
+
+// Run Python code
 async function runCode() {
   const code = document.getElementById("code").value;
   const output = document.getElementById("output");
-  output.textContent = ""; // clear previous output
+  output.innerHTML = "";
 
-  // Redirect stdout
   pyodide.runPython(`
 import sys
 from io import StringIO
 sys.stdout = StringIO()
 `);
 
-  // Override input() to use inline output box
-  pyodide.globals.set("input", async (promptText) => {
-    writeOutput(promptText); // show prompt
-    return await new Promise((resolve) => {
-      inputResolve = resolve;
-    });
-  });
+  pyodide.globals.set("input", createInput);
 
   try {
     await pyodide.runPythonAsync(code);
