@@ -2,8 +2,13 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Python environment</title>
+  <title>Python Environment</title>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+  <style>
+    body { font-family: monospace; margin: 20px; }
+    #code { width: 100%; font-family: monospace; font-size: 14px; }
+    #output { width: 100%; height: 300px; background: black; color: lightgreen; padding: 10px; overflow-y: auto; white-space: pre-wrap; }
+  </style>
 </head>
 <body>
 
@@ -11,6 +16,8 @@
 
 <textarea id="code" rows="20" cols="70">
 print("Hello world!")
+x = input("Enter a number: ")
+print("You typed:", x)
 </textarea>
 <br><br>
 
@@ -21,35 +28,61 @@ print("Hello world!")
 
 <script>
 let pyodide;
+let inputResolve;
 
+// Helper to write to the output box
+function writeOutput(text) {
+  const output = document.getElementById("output");
+  output.textContent += text;
+  output.scrollTop = output.scrollHeight; // auto scroll
+}
+
+// Handle Enter key for inline input
+document.getElementById("output").addEventListener("keydown", function(e) {
+  if (e.key === "Enter" && inputResolve) {
+    const output = document.getElementById("output");
+    const lines = output.textContent.split("\n");
+    const lastLine = lines[lines.length - 1];
+    inputResolve(lastLine.replace(/^[^:]*:\s*/, "")); // remove prompt text
+    inputResolve = null;
+    writeOutput("\n");
+    e.preventDefault();
+  }
+});
+
+// Load Pyodide
 async function loadPyodideAndPackages() {
   pyodide = await loadPyodide();
 }
 loadPyodideAndPackages();
 
-
+// Run code function
 async function runCode() {
-  let code = document.getElementById("code").value;
-  let output = document.getElementById("output");
+  const code = document.getElementById("code").value;
+  const output = document.getElementById("output");
+  output.textContent = ""; // clear previous output
 
-  try {
-    // Redirect stdout
-    pyodide.runPython(`
+  // Redirect stdout
+  pyodide.runPython(`
 import sys
 from io import StringIO
 sys.stdout = StringIO()
 `);
 
-    // Make input() work using browser prompt
-    pyodide.globals.set("input", (msg) => prompt(msg));
+  // Override input() to use inline output box
+  pyodide.globals.set("input", async (promptText) => {
+    writeOutput(promptText); // show prompt
+    return await new Promise((resolve) => {
+      inputResolve = resolve;
+    });
+  });
 
+  try {
     await pyodide.runPythonAsync(code);
-
     let stdout = pyodide.runPython("sys.stdout.getvalue()");
-    output.textContent = stdout;
-
+    writeOutput(stdout);
   } catch (err) {
-    output.textContent = err;
+    writeOutput("\nError: " + err);
   }
 }
 </script>
