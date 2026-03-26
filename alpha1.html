@@ -7,133 +7,143 @@
   <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
   <style>
     body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      transition: background 0.3s, color 0.3s;
+      font-family: monospace;
+      margin: 20px;
     }
-    header {
-      padding: 10px;
-      background: #222;
-      color: #fff;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    header button {
-      padding: 5px 10px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    #container {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
-    #editor {
-      flex: 1;
-      padding: 10px;
-      box-sizing: border-box;
-      border-right: 1px solid #ccc;
-      resize: none;
+    textarea {
+      width: 100%;
+      height: 300px;
       font-family: monospace;
       font-size: 16px;
-      width: 50%;
-      height: 100%;
     }
-    #console {
-      flex: 1;
+    pre {
+      background: #f0f0f0;
       padding: 10px;
-      box-sizing: border-box;
-      background: #f5f5f5;
+      min-height: 150px;
       overflow-y: auto;
-      white-space: pre-wrap;
-      font-family: monospace;
-      font-size: 16px;
-      width: 50%;
-      height: 100%;
     }
-    button.run-btn {
+    button {
       margin-top: 10px;
       padding: 5px 15px;
       font-size: 16px;
       cursor: pointer;
     }
-    .dark-mode {
-      background: #121212;
-      color: #e0e0e0;
-    }
-    .dark-mode #console {
-      background: #1e1e1e;
-      color: #e0e0e0;
-    }
-    .error {
-      color: #ff5555;
-    }
   </style>
 </head>
 <body>
 
-<header>
-  <h2>Python Editor</h2>
-  <button id="toggleTheme">Dark Mode</button>
-</header>
+<h2>Python Editor</h2>
 
-<div id="container">
-  <textarea id="editor">print("Hello world!")</textarea>
-  <div id="console"></div>
-</div>
+<textarea id="code">print("Hello world!")</textarea>
+<br>
+<button id="runBtn" onclick="runCode()" disabled>Run</button>
+<button onclick="unlockThirdParty()">Enter Passcode</button>
 
-<button class="run-btn" onclick="runCode()">Run Code</button>
+<h3>Output:</h3>
+<pre id="output"></pre>
 
 <script>
-  let pyodide;
-  let darkMode = false;
+let pyodide;
+let thirdPartyAllowed = false;
 
-  // Load Pyodide
-  async function loadPyodideAndPackages() {
-    pyodide = await loadPyodide();
-    console.log("Pyodide loaded!");
-  }
-  loadPyodideAndPackages();
+// Load Pyodide and set up environment
+async function loadPyodideAndPackages() {
+  pyodide = await loadPyodide();
+  console.log("Pyodide loaded!");
 
-  // Dark mode toggle
-  document.getElementById("toggleTheme").addEventListener("click", () => {
-    darkMode = !darkMode;
-    document.body.classList.toggle("dark-mode", darkMode);
-    document.getElementById("toggleTheme").textContent = darkMode ? "Light Mode" : "Dark Mode";
-  });
-
-  async function runCode() {
-    const code = document.getElementById("editor").value;
-    const outputDiv = document.getElementById("console");
-    outputDiv.textContent = ""; // Clear previous output
-
-    try {
-      // Reset stdout
-      pyodide.runPython(`
+  // Async setup for stdout streaming and restricted imports
+  await pyodide.runPythonAsync(`
 import sys
-from io import StringIO
-sys.stdout = StringIO()
+import builtins
+import js
+
+# Allowed standard library modules
+ALLOWED_MODULES = {
+    "asyncio", "math", "time", "sys", "random",
+    "itertools", "functools", "collections", "re"
+}
+
+# Stream stdout to JS
+class Stream:
+    def __init__(self):
+        self.content = ""
+    def write(self, s):
+        self.content += s
+        js.update_output(self.content)
+    def flush(self):
+        pass
+
+sys.stdout = Stream()
+sys.stderr = Stream()
+
+# Block imports not in whitelist
+_real_import = builtins.__import__
+def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name not in ALLOWED_MODULES:
+        raise ImportError(f"Import of '{name}' is blocked. Request passcode to unlock.")
+    return _real_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = restricted_import
 `);
 
-      // Set input function
-      pyodide.globals.set("input", (msg) => prompt(msg || "Enter input:"));
+  // Enable Run button
+  document.getElementById("runBtn").disabled = false;
+}
 
-      await pyodide.runPythonAsync(code);
+// JS function to stream output
+window.update_output = (text) => {
+  const output = document.getElementById("output");
+  output.textContent = text;
+  output.scrollTop = output.scrollHeight;
+};
 
-      let stdout = pyodide.runPython("sys.stdout.getvalue()");
-      outputDiv.textContent = stdout;
-
-    } catch (err) {
-      outputDiv.innerHTML = `<span class="error">${err}</span>`;
-    }
-
-    // Scroll to bottom
-    outputDiv.scrollTop = outputDiv.scrollHeight;
+// Run code safely
+async function runCode() {
+  const output = document.getElementById("output");
+  if (!pyodide) {
+    output.textContent = "Python environment is still loading. Please wait...";
+    return;
   }
+
+  output.textContent = ""; // clear previous output
+  const code = document.getElementById("code").value;
+
+  try {
+    await pyodide.runPythonAsync(code);
+  } catch (err) {
+    output.textContent += "\n" + err;
+  }
+}
+
+// Unlock third-party packages
+function unlockThirdParty() {
+  const code = prompt("Enter passcode to allow third-party packages:");
+  const correctPasscode = "CLASS123"; // set your passcode here
+
+  if (code === correctPasscode) {
+    thirdPartyAllowed = true;
+    alert("Third-party modules are now unlocked for this session!");
+
+    // Remove the restricted import in Pyodide
+    pyodide.runPythonAsync(`
+import builtins
+builtins.__import__ = __import__  # restore normal import behavior
+`).then(() => console.log("Imports unlocked"));
+  } else {
+    alert("Incorrect passcode!");
+  }
+}
+
+// Optional: helper to load packages safely
+async function safeLoadPackage(pkgName) {
+  if (!thirdPartyAllowed) {
+    alert("Third-party packages are blocked! Enter passcode to unlock.");
+    return;
+  }
+  await pyodide.loadPackage(pkgName);
+}
+
+loadPyodideAndPackages();
 </script>
 
 </body>
