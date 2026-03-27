@@ -157,6 +157,7 @@
 <pre id="output">Starting Python engine...</pre>
 
 <script>
+const LS_val = "pyEditorMain"
 let pyodide;
 const codeArea = document.getElementById("code");
 const highlighter = document.getElementById("highlighter");
@@ -205,7 +206,7 @@ function updateEditor() {
         numStr += (i > lines.length) ? `<span style="opacity:0.2">${i}</span><br>` : `${i}<br>`;
     }
     lineNumbers.innerHTML = numStr;
-    localStorage.setItem('pyEditor_alpha3', val);
+    localStorage.setItem(LS_val, val);
 }
 
 codeArea.addEventListener('scroll', () => {
@@ -340,7 +341,7 @@ function clearEditor() {
 }
 
 window.onload = () => {
-    const saved = localStorage.getItem('pyEditor_alpha3');
+    const saved = localStorage.getItem(LS_val);
     if (saved) codeArea.value = saved;
     updateEditor();
     setupPyodide();
