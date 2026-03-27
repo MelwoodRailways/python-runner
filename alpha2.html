@@ -3,28 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Python Alpha 2 - Fixed</title>
+  <title>Python Editor - Alpha 3</title>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
   <style>
     :root {
       --bg-color: #ffffff;
       --text-color: #24292e;
       --keyword: #d73a49;
-      --string: #032f62;
+      --string: #e67e22; /* Trinket-style Orange */
       --comment: #6a737d;
       --builtin: #005cc5;
+      --line-num-bg: #f0f0f0;
+      --line-num-text: #999;
     }
 
-    body { font-family: sans-serif; margin: 20px; background: #eee; }
+    body { font-family: sans-serif; margin: 20px; background: #eee; color: #333; }
     
-    .editor-wrapper {
+    .editor-container {
+      display: flex;
       position: relative;
       width: 100%;
-      height: 400px;
+      height: 450px;
       border: 1px solid #ddd;
       border-radius: 6px;
       background: var(--bg-color);
       overflow: hidden;
+    }
+
+    /* Line Numbers Column */
+    #line-numbers {
+      width: 40px;
+      padding: 15px 5px;
+      background: var(--line-num-bg);
+      color: var(--line-num-text);
+      font-family: 'Fira Code', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      text-align: right;
+      user-select: none;
+      border-right: 1px solid #ddd;
+      overflow: hidden;
+    }
+
+    /* The Editor Wrapper (Highlighter + Textarea) */
+    .editor-wrapper {
+      position: relative;
+      flex-grow: 1;
+      height: 100%;
     }
 
     #code, #highlighter {
@@ -33,8 +58,9 @@
       font-family: 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
       font-size: 14px;
       line-height: 1.6;
-      white-space: pre-wrap;
-      word-wrap: break-word;
+      white-space: pre; /* Changed to pre for better line-number alignment */
+      word-wrap: normal;
+      overflow-x: auto;
       position: absolute;
       top: 0;
       left: 0;
@@ -56,7 +82,6 @@
     #highlighter {
       z-index: 1;
       color: var(--text-color);
-      overflow-y: auto;
       pointer-events: none;
     }
 
@@ -66,46 +91,50 @@
     .hl-comment { color: var(--comment); font-style: italic; }
     .hl-builtin { color: var(--builtin); }
 
-    .controls { margin-top: 15px; display: flex; gap: 10px; }
-    button { padding: 8px 20px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: white; }
-    #runBtn { background: #28a745; color: white; font-weight: bold; }
-    #runBtn:disabled { background: #94d3a2; }
+    .controls { margin: 15px 0; display: flex; gap: 10px; }
+    button { padding: 8px 20px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: white; transition: 0.2s; }
+    button:hover { background: #f8f8f8; }
+    #runBtn { background: #28a745; color: white; font-weight: bold; border-color: #218838; }
+    #runBtn:disabled { background: #94d3a2; cursor: wait; }
     
     pre#output { 
       background: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 6px; 
-      min-height: 100px; max-height: 300px; overflow-y: auto; font-family: monospace;
+      min-height: 100px; max-height: 300px; overflow-y: auto; font-family: 'Courier New', monospace;
     }
   </style>
 </head>
 <body>
 
-<h2>Python Editor</h2>
+<h2>Python Editor <small style="font-size: 14px; font-weight: normal; color: #666;">(v0.3 - Line Numbers & Orange Strings)</small></h2>
 
-<div class="editor-wrapper">
-  <div id="highlighter"></div>
-  <textarea id="code" spellcheck="false">print("Hello world!")</textarea>
+<div class="editor-container">
+  <div id="line-numbers">1</div>
+  <div class="editor-wrapper">
+    <div id="highlighter"></div>
+    <textarea id="code" spellcheck="false" wrap="off">print("Hello world!")
+# Try typing a new line...</textarea>
+  </div>
 </div>
 
 <div class="controls">
-  <button id="runBtn" onclick="runCode()" disabled>Loading...</button>
-  <button onclick="downloadCode()">Download</button>
-  <button onclick="clearEditor()" style="color: red;">Clear</button>
+  <button id="runBtn" onclick="runCode()" disabled>Loading Pyodide...</button>
+  <button onclick="downloadCode()">Download .py</button>
+  <button onclick="clearEditor()" style="color: #d9534f;">Clear Code</button>
 </div>
 
-<h3>Console:</h3>
+<h3>Output:</h3>
 <pre id="output"></pre>
 
 <script>
 let pyodide;
 const codeArea = document.getElementById("code");
 const highlighter = document.getElementById("highlighter");
+const lineNumbers = document.getElementById("line-numbers");
 
-// --- FIX: ONE-PASS HIGHLIGHTER ---
+// --- 1. SYNTAX HIGHLIGHTING (Tokenization) ---
 function applyHighlight(text) {
-    // 1. Escape HTML
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-    // 2. Define patterns
     const patterns = [
         { name: 'comment', regex: /#.*$/gm },
         { name: 'string',  regex: /(['"])(?:(?=(\\?))\2.)*?\1/g },
@@ -113,8 +142,6 @@ function applyHighlight(text) {
         { name: 'builtin', regex: /\b(print|input|len|range|str|int|float|list|dict|set|type|sum|max|min)\b/g }
     ];
 
-    // 3. Process the text in one go to prevent nested tags
-    // We use a dummy character to mark parts we've already colored
     let parts = [{ text: html, isToken: false }];
 
     patterns.forEach(pattern => {
@@ -126,18 +153,12 @@ function applyHighlight(text) {
                 let lastIndex = 0;
                 let match;
                 while ((match = pattern.regex.exec(part.text)) !== null) {
-                    // Push text before match
                     if (match.index > lastIndex) {
                         newParts.push({ text: part.text.substring(lastIndex, match.index), isToken: false });
                     }
-                    // Push the matched token
-                    newParts.push({ 
-                        text: `<span class="hl-${pattern.name}">${match[0]}</span>`, 
-                        isToken: true 
-                    });
+                    newParts.push({ text: `<span class="hl-${pattern.name}">${match[0]}</span>`, isToken: true });
                     lastIndex = pattern.regex.lastIndex;
                 }
-                // Push remaining text
                 if (lastIndex < part.text.length) {
                     newParts.push({ text: part.text.substring(lastIndex), isToken: false });
                 }
@@ -149,17 +170,37 @@ function applyHighlight(text) {
     return parts.map(p => p.text).join("");
 }
 
-function syncEditor() {
-    highlighter.innerHTML = applyHighlight(codeArea.value) + "\n";
-    localStorage.setItem('pyEditor_save', codeArea.value);
+// --- 2. UPDATE VIEW & LINE NUMBERS ---
+function updateEditor() {
+    const text = codeArea.value;
+    
+    // Update Highlight
+    highlighter.innerHTML = applyHighlight(text) + "\n";
+    
+    // Update Line Numbers
+    const lines = text.split('\n').length;
+    let lineNumHtml = '';
+    for (let i = 1; i <= lines; i++) {
+        lineNumHtml += i + '<br>';
+    }
+    lineNumbers.innerHTML = lineNumHtml;
+
+    // Save
+    localStorage.setItem('pyEditor_save', text);
 }
 
-// Event Listeners
-codeArea.addEventListener('input', syncEditor);
-codeArea.addEventListener('scroll', () => { highlighter.scrollTop = codeArea.scrollTop; });
+// Sync scrolling for all layers
+codeArea.addEventListener('scroll', () => {
+    highlighter.scrollTop = codeArea.scrollTop;
+    highlighter.scrollLeft = codeArea.scrollLeft;
+    lineNumbers.scrollTop = codeArea.scrollTop;
+});
 
-// IDE Features
+codeArea.addEventListener('input', updateEditor);
+
+// --- 3. KEYBOARD FEATURES ---
 const pairs = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
+
 codeArea.addEventListener('keydown', function(e) {
     const start = this.selectionStart;
     const end = this.selectionEnd;
@@ -169,13 +210,13 @@ codeArea.addEventListener('keydown', function(e) {
         e.preventDefault();
         this.value = val.substring(0, start) + e.key + pairs[e.key] + val.substring(end);
         this.selectionStart = this.selectionEnd = start + 1;
-        syncEditor();
+        updateEditor();
     }
     if (e.key === 'Tab') {
         e.preventDefault();
         this.value = val.substring(0, start) + "    " + val.substring(end);
         this.selectionStart = this.selectionEnd = start + 4;
-        syncEditor();
+        updateEditor();
     }
     if (e.key === 'Enter') {
         e.preventDefault();
@@ -185,11 +226,11 @@ codeArea.addEventListener('keydown', function(e) {
         if (currentLine.trimEnd().endsWith(":")) indent += "    ";
         this.value = val.substring(0, start) + "\n" + indent + val.substring(end);
         this.selectionStart = this.selectionEnd = start + 1 + indent.length;
-        syncEditor();
+        updateEditor();
     }
 });
 
-// Utilities
+// --- 4. UTILITIES ---
 function downloadCode() {
     const blob = new Blob([codeArea.value], { type: 'text/plain' });
     const a = document.createElement('a');
@@ -199,16 +240,20 @@ function downloadCode() {
 }
 
 function clearEditor() {
-    if(confirm("Clear code?")) { codeArea.value = ""; syncEditor(); }
+    if(confirm("Are you sure you want to clear your code?")) {
+        codeArea.value = "";
+        updateEditor();
+    }
 }
 
-// Pyodide Setup
+// --- 5. PYODIDE CORE ---
 async function setupPyodide() {
-  pyodide = await loadPyodide();
-  window.update_output = (text) => {
-    document.getElementById("output").textContent += text;
-  };
-  await pyodide.runPythonAsync(`
+    try {
+        pyodide = await loadPyodide();
+        window.update_output = (text) => {
+            document.getElementById("output").textContent += text;
+        };
+        await pyodide.runPythonAsync(`
 import sys, builtins, js
 def reset_streams():
     class Stream:
@@ -217,24 +262,33 @@ def reset_streams():
     sys.stdout = sys.stderr = Stream()
 reset_streams()
 builtins.input = lambda msg="": js.prompt(msg)
-  `);
-  document.getElementById("runBtn").disabled = false;
-  document.getElementById("runBtn").textContent = "Run Code";
+        `);
+        const btn = document.getElementById("runBtn");
+        btn.disabled = false;
+        btn.textContent = "Run Code";
+        document.getElementById("output").textContent = "Python Ready.\n";
+    } catch (e) {
+        document.getElementById("output").textContent = "Error loading Pyodide: " + e;
+    }
 }
 
 async function runCode() {
-  document.getElementById("output").textContent = "";
-  await pyodide.runPythonAsync("reset_streams()");
-  try { await pyodide.runPythonAsync(codeArea.value); } 
-  catch (err) { document.getElementById("output").textContent += "\n" + err; }
+    document.getElementById("output").textContent = "";
+    await pyodide.runPythonAsync("reset_streams()");
+    try {
+        await pyodide.runPythonAsync(codeArea.value);
+    } catch (err) {
+        document.getElementById("output").textContent += "\n" + err;
+    }
 }
 
 window.onload = () => {
     const saved = localStorage.getItem('pyEditor_save');
     if (saved) codeArea.value = saved;
-    syncEditor();
+    updateEditor();
     setupPyodide();
 };
 </script>
+
 </body>
 </html>
